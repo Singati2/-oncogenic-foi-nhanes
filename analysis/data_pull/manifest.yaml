@@ -1,0 +1,108 @@
+# NHANES 2003-2010 file manifest for oncogenic-foi-nhanes.
+#
+# Verified against CDC laboratory catalog 2026-05-30:
+#   https://wwwn.cdc.gov/nchs/nhanes/search/datapage.aspx?Component=Laboratory&Cycle=<YYYY-YYYY>
+#
+# URL pattern: <base_url>/<years>/<FILE>.XPT
+# When CDC publishes a new cycle or revises a file, update THIS file only —
+# no URLs are hard-coded in Python.
+
+base_url: https://wwwn.cdc.gov/Nchs/Nhanes
+
+cycles:
+  C:
+    years: "2003-2004"
+    files:
+      demo: { file: DEMO_C,   relpath: "2003-2004/DEMO_C.XPT" }
+      hcv:  { file: L02_C,    relpath: "2003-2004/L02_C.XPT" }
+      hsv:  { file: L09_C,    relpath: "2003-2004/L09_C.XPT" }
+      hpv:  { file: L52SER_C, relpath: "2003-2004/L52SER_C.XPT" }
+      ebv:  { file: SSEBV_C,  relpath: "2003-2004/SSEBV_C.XPT" }
+  D:
+    years: "2005-2006"
+    files:
+      demo: { file: DEMO_D,   relpath: "2005-2006/DEMO_D.XPT" }
+      hcv:  { file: HEPC_D,   relpath: "2005-2006/HEPC_D.XPT" }
+      hsv:  { file: HSV_D,    relpath: "2005-2006/HSV_D.XPT" }
+      hpv:  { file: HPVSER_D, relpath: "2005-2006/HPVSER_D.XPT" }
+      ebv:  { file: SSEBV_D,  relpath: "2005-2006/SSEBV_D.XPT" }
+  E:
+    years: "2007-2008"
+    files:
+      demo: { file: DEMO_E,   relpath: "2007-2008/DEMO_E.XPT" }
+      hcv:  { file: HEPC_E,   relpath: "2007-2008/HEPC_E.XPT" }
+      hsv:  { file: HSV_E,    relpath: "2007-2008/HSV_E.XPT" }
+      hpv:  { file: HPVSER_E, relpath: "2007-2008/HPVSER_E.XPT" }
+      ebv:  { file: SSEBV_E,  relpath: "2007-2008/SSEBV_E.XPT" }
+  F:
+    years: "2009-2010"
+    files:
+      demo: { file: DEMO_F,   relpath: "2009-2010/DEMO_F.XPT" }
+      hcv:  { file: HEPC_F,   relpath: "2009-2010/HEPC_F.XPT" }
+      hsv:  { file: HSV_F,    relpath: "2009-2010/HSV_F.XPT" }
+      hpv:  { file: HPVSER_F, relpath: "2009-2010/HPVSER_F.XPT" }
+      ebv:  { file: SSEBV_F,  relpath: "2009-2010/SSEBV_F.XPT" }
+
+# ---------------------------------------------------------------------------
+# Variable specifications.
+#
+# Variable names CAN change between cycles, especially the older L02_C / L09_C
+# files. On first download, run `python -m analysis.data_pull.inspect <file>`
+# to dump column names, then update this section if needed.
+# ---------------------------------------------------------------------------
+
+variables:
+  demo:
+    seqn:          SEQN
+    age:           RIDAGEYR
+    sex:           RIAGENDR
+    race:          RIDRETH1   # 2003-2010 cycles all carry RIDRETH1
+    education:     DMDEDUC2
+    poverty_ratio: INDFMPIR
+    weight_mec_2y: WTMEC2YR
+    psu:           SDMVPSU
+    stratum:       SDMVSTRA
+
+  hcv:
+    # Confirmed HCV antibody status. NHANES coding: 1=Pos, 2=Neg, 3=Indeterminate
+    # Variable name varies slightly by cycle — verify against codebook.
+    sero_var_by_cycle:
+      C: LBDHCV
+      D: LBDHCV
+      E: LBDHCV
+      F: LBDHCV
+    positive_values: [1]
+    negative_values: [2]
+
+  hsv1:
+    # Type-specific HSV-1 IgG by enzymatic immunodot.
+    sero_var: LBXHE1
+    positive_values: [1]
+    negative_values: [2]
+
+  hsv2:
+    sero_var: LBXHE2
+    positive_values: [1]
+    negative_values: [2]
+
+  ebv:
+    # EBV VCA IgG (children 6-19 in 2003-2010 surplus serum files).
+    sero_var: LBXEBV
+    positive_values: [1]
+    negative_values: [2]
+
+  hpv:
+    # HPV serology is multi-type. We derive "any high-risk type seropositive"
+    # from the type-specific variables below. Variable names follow the
+    # LBXH<type> convention in continuous NHANES.
+    high_risk_type_vars:
+      - LBXH16
+      - LBXH18
+      - LBXH31
+      - LBXH33
+      - LBXH35
+      - LBXH45
+      - LBXH52
+      - LBXH58
+    positive_values: [1]
+    negative_values: [2]

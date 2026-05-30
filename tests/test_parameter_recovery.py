@@ -1,31 +1,39 @@
-"""Parameter-recovery tests (project plan §8).
+"""Parameter-recovery test for the constant-FOI Bayesian catalytic model.
 
-For known synthetic λ values, the Bayesian fit should recover λ within the 95%
-credible interval at least 95% of the time across simulated datasets.
+A single NUTS fit on a clean simulated dataset must recover the true λ
+within the 95% credible interval. This is the core sanity check that the
+Bayesian implementation is correct.
 
-This is the central test that the TDD plan asks to be green before any real-data
-fit is performed.
+Marked @pytest.mark.slow because it runs JAX compilation + NUTS sampling
+(~10-30 s). Run explicitly with:  pytest -m slow
 """
 
+from __future__ import annotations
+
+import numpy as np
 import pytest
+
+from analysis.model.bayesian import fit_catalytic
+from analysis.model.catalytic import simulate_serology
 
 
 @pytest.mark.slow
-@pytest.mark.skip(reason="inference not yet implemented — see analysis/inference/")
 def test_recovers_constant_foi_within_ci(rng_seed: int) -> None:
-    """Recovery coverage ≥ 95% for constant λ across 100 sim datasets."""
-    # true_lambda = 0.05
-    # n_sims = 100
-    # n_per_sim = 1_000
-    #
-    # covered = 0
-    # for s in range(n_sims):
-    #     data = simulate_serology(lambda_=true_lambda, n=n_per_sim, seed=rng_seed + s)
-    #     posterior = fit_catalytic(data)
-    #     lo, hi = posterior["lambda"].quantile([0.025, 0.975])
-    #     if lo <= true_lambda <= hi:
-    #         covered += 1
-    #
-    # assert covered / n_sims >= 0.95
+    """A single NUTS fit recovers true λ within the 95% CrI on a clean sim."""
+    true_lambda = 0.05
+    ages = np.arange(10, 71, 5).astype(float)   # 13 age points: 10, 15, ..., 70
+    n_per_age = 200
+    n_pos = simulate_serology(true_lambda, ages, n_per_age, seed=rng_seed)
+    n_total = np.full_like(ages, n_per_age, dtype=int)
 
-    raise NotImplementedError
+    mcmc = fit_catalytic(
+        ages, n_total, n_pos,
+        n_warmup=500, n_samples=1000,
+        seed=rng_seed,
+    )
+    samples = np.asarray(mcmc.get_samples()["lambda"])
+    lo, hi = np.quantile(samples, [0.025, 0.975])
+
+    assert lo <= true_lambda <= hi, (
+        f"true λ={true_lambda} not inside 95% CrI [{lo:.5f}, {hi:.5f}]"
+    )

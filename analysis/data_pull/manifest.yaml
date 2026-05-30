@@ -1,54 +1,58 @@
 # NHANES 2003-2010 file manifest for oncogenic-foi-nhanes.
 #
-# Verified against CDC laboratory catalog 2026-05-30:
-#   https://wwwn.cdc.gov/nchs/nhanes/search/datapage.aspx?Component=Laboratory&Cycle=<YYYY-YYYY>
+# Verified against CDC laboratory catalog 2026-05-30; URL pattern corrected
+# 2026-05-30 after the older /Nchs/Nhanes/<years>/<FILE>.XPT pattern was found
+# to return a soft-404 HTML page. The current canonical pattern is:
 #
-# URL pattern: <base_url>/<years>/<FILE>.XPT
-# When CDC publishes a new cycle or revises a file, update THIS file only —
+#     <base_url>/<first_year_of_cycle>/DataFiles/<FILE>.xpt
+#
+# When CDC publishes a new cycle or moves a file, update THIS file only —
 # no URLs are hard-coded in Python.
 
-base_url: https://wwwn.cdc.gov/Nchs/Nhanes
+base_url: https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public
 
 cycles:
   C:
     years: "2003-2004"
     files:
-      demo: { file: DEMO_C,   relpath: "2003-2004/DEMO_C.XPT" }
-      hcv:  { file: L02_C,    relpath: "2003-2004/L02_C.XPT" }
-      hsv:  { file: L09_C,    relpath: "2003-2004/L09_C.XPT" }
-      hpv:  { file: L52SER_C, relpath: "2003-2004/L52SER_C.XPT" }
-      ebv:  { file: SSEBV_C,  relpath: "2003-2004/SSEBV_C.XPT" }
+      demo: { file: DEMO_C,   relpath: "2003/DataFiles/DEMO_C.xpt" }
+      hcv:  { file: L02_C,    relpath: "2003/DataFiles/L02_C.xpt" }
+      hsv:  { file: L09_C,    relpath: "2003/DataFiles/L09_C.xpt" }
+      hpv:  { file: L52SER_C, relpath: "2003/DataFiles/L52SER_C.xpt" }
+      ebv:  { file: SSEBV_C,  relpath: "2003/DataFiles/SSEBV_C.xpt" }
   D:
     years: "2005-2006"
     files:
-      demo: { file: DEMO_D,   relpath: "2005-2006/DEMO_D.XPT" }
-      hcv:  { file: HEPC_D,   relpath: "2005-2006/HEPC_D.XPT" }
-      hsv:  { file: HSV_D,    relpath: "2005-2006/HSV_D.XPT" }
-      hpv:  { file: HPVSER_D, relpath: "2005-2006/HPVSER_D.XPT" }
-      ebv:  { file: SSEBV_D,  relpath: "2005-2006/SSEBV_D.XPT" }
+      demo: { file: DEMO_D,   relpath: "2005/DataFiles/DEMO_D.xpt" }
+      hcv:  { file: HEPC_D,   relpath: "2005/DataFiles/HEPC_D.xpt" }
+      hsv:  { file: HSV_D,    relpath: "2005/DataFiles/HSV_D.xpt" }
+      hpv:  { file: HPVSER_D, relpath: "2005/DataFiles/HPVSER_D.xpt" }
+      ebv:  { file: SSEBV_D,  relpath: "2005/DataFiles/SSEBV_D.xpt" }
   E:
     years: "2007-2008"
     files:
-      demo: { file: DEMO_E,   relpath: "2007-2008/DEMO_E.XPT" }
-      hcv:  { file: HEPC_E,   relpath: "2007-2008/HEPC_E.XPT" }
-      hsv:  { file: HSV_E,    relpath: "2007-2008/HSV_E.XPT" }
-      hpv:  { file: HPVSER_E, relpath: "2007-2008/HPVSER_E.XPT" }
-      ebv:  { file: SSEBV_E,  relpath: "2007-2008/SSEBV_E.XPT" }
+      demo: { file: DEMO_E,   relpath: "2007/DataFiles/DEMO_E.xpt" }
+      hcv:  { file: HEPC_E,   relpath: "2007/DataFiles/HEPC_E.xpt" }
+      hsv:  { file: HSV_E,    relpath: "2007/DataFiles/HSV_E.xpt" }
+      hpv:  { file: HPVSER_E, relpath: "2007/DataFiles/HPVSER_E.xpt" }
+      ebv:  { file: SSEBV_E,  relpath: "2007/DataFiles/SSEBV_E.xpt" }
   F:
     years: "2009-2010"
     files:
-      demo: { file: DEMO_F,   relpath: "2009-2010/DEMO_F.XPT" }
-      hcv:  { file: HEPC_F,   relpath: "2009-2010/HEPC_F.XPT" }
-      hsv:  { file: HSV_F,    relpath: "2009-2010/HSV_F.XPT" }
-      hpv:  { file: HPVSER_F, relpath: "2009-2010/HPVSER_F.XPT" }
-      ebv:  { file: SSEBV_F,  relpath: "2009-2010/SSEBV_F.XPT" }
+      demo: { file: DEMO_F,   relpath: "2009/DataFiles/DEMO_F.xpt" }
+      hcv:  { file: HEPC_F,   relpath: "2009/DataFiles/HEPC_F.xpt" }
+      hsv:  { file: HSV_F,    relpath: "2009/DataFiles/HSV_F.xpt" }
+      hpv:  { file: HPVSER_F, relpath: "2009/DataFiles/HPVSER_F.xpt" }
+      ebv:  { file: SSEBV_F,  relpath: "2009/DataFiles/SSEBV_F.xpt" }
 
 # ---------------------------------------------------------------------------
 # Variable specifications.
 #
 # Variable names CAN change between cycles, especially the older L02_C / L09_C
-# files. On first download, run `python -m analysis.data_pull.inspect <file>`
-# to dump column names, then update this section if needed.
+# files. If a sero_* column comes back all-NA after a successful download, the
+# variable name probably needs an update — open the file's codebook page at
+#   https://wwwn.cdc.gov/Nchs/Nhanes/<years>/<FILE>.htm
+# and revise the entries below.
 # ---------------------------------------------------------------------------
 
 variables:
@@ -65,7 +69,6 @@ variables:
 
   hcv:
     # Confirmed HCV antibody status. NHANES coding: 1=Pos, 2=Neg, 3=Indeterminate
-    # Variable name varies slightly by cycle — verify against codebook.
     sero_var_by_cycle:
       C: LBDHCV
       D: LBDHCV
@@ -75,7 +78,6 @@ variables:
     negative_values: [2]
 
   hsv1:
-    # Type-specific HSV-1 IgG by enzymatic immunodot.
     sero_var: LBXHE1
     positive_values: [1]
     negative_values: [2]
@@ -86,23 +88,27 @@ variables:
     negative_values: [2]
 
   ebv:
-    # EBV VCA IgG (children 6-19 in 2003-2010 surplus serum files).
-    sero_var: LBXEBV
+    # EBV VCA IgG. Variable is SSEBV (surplus-serum convention), not LBXEBV.
+    # Coding: 1=positive, 2=negative, 3=indeterminate.
+    sero_var_by_cycle:
+      C: SSEBV
+      D: SSEBV
+      E: SSEBV
+      F: SSEBV
     positive_values: [1]
     negative_values: [2]
 
   hpv:
-    # HPV serology is multi-type. We derive "any high-risk type seropositive"
-    # from the type-specific variables below. Variable names follow the
-    # LBXH<type> convention in continuous NHANES.
-    high_risk_type_vars:
-      - LBXH16
-      - LBXH18
-      - LBXH31
-      - LBXH33
-      - LBXH35
-      - LBXH45
-      - LBXH52
-      - LBXH58
+    # NHANES 2003-2010 HPV serology measured only 4 types: 6, 11, 16, 18.
+    # High-risk oncogenic types in this panel: 16 and 18 only (~70% of
+    # cervical cancer burden — see docs/decisions/0002-hpv-types.md).
+    # Variable naming differs across cycles:
+    #   C, D: LBXS<NN>MK (Roche-MK assay)
+    #   E, F: LBX<NN>
+    high_risk_type_vars_by_cycle:
+      C: [LBXS16MK, LBXS18MK]
+      D: [LBXS16MK, LBXS18MK]
+      E: [LBX16, LBX18]
+      F: [LBX16, LBX18]
     positive_values: [1]
     negative_values: [2]

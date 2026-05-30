@@ -31,11 +31,41 @@ def load_manifest() -> dict:
         return yaml.safe_load(f)
 
 
+# SAS Transport (XPT) files start with this 80-byte header record.
+# Anything that doesn't begin with "HEADER RECORD" is not a real XPT file —
+# usually a CDC soft-404 HTML page being served with HTTP 200.
+_XPT_MAGIC = b"HEADER RECORD"
+_HTML_MAGIC = (b"<!", b"<h", b"<H")
+
+
+def _validate_xpt(target: Path, url: str) -> None:
+    """Raise if the downloaded file isn't a real SAS XPT. Deletes the bad file."""
+    with target.open("rb") as f:
+        head = f.read(80)
+    if head.startswith(_HTML_MAGIC):
+        target.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"{url} returned an HTML page (likely a soft-404). "
+            "Update the manifest URL pattern."
+        )
+    if not head.startswith(_XPT_MAGIC):
+        target.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"{url} did not return a SAS XPT file "
+            f"(first 16 bytes: {head[:16]!r}). Update the manifest."
+        )
+
+
 def download_one(url: str, target: Path, *, timeout: int = 60) -> Path:
-    """Download a single file. Skip if already on disk and non-empty (cache)."""
+    """Download a single XPT file. Skip if already cached and valid."""
     if target.exists() and target.stat().st_size > 0:
-        logger.info("cached  %s", target.relative_to(PROJECT_ROOT))
-        return target
+        try:
+            _validate_xpt(target, url)
+            logger.info("cached  %s", target.relative_to(PROJECT_ROOT))
+            return target
+        except RuntimeError:
+            logger.warning("cached file at %s is invalid; re-downloading", target)
+            target.unlink(missing_ok=True)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     logger.info("fetch   %s", url)
@@ -56,6 +86,7 @@ def download_one(url: str, target: Path, *, timeout: int = 60) -> Path:
         target.unlink(missing_ok=True)
         raise RuntimeError(f"Empty download from {url}")
 
+    _validate_xpt(target, url)
     logger.info("saved   %s (%d bytes)", target.relative_to(PROJECT_ROOT), target.stat().st_size)
     return target
 

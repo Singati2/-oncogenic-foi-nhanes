@@ -216,3 +216,60 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ====== Project-specific (added on scaffold) ======
+
+# NHANES raw data — reproducible from CDC, never commit
+*.XPT
+*.xpt
+*.sas7bdat
+data/raw/
+data/external/
+data/interim/
+
+# Secrets / tokens
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+secrets.yml
+
+# R / RStudio
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+renv/library/
+renv/local/
+renv/staging/
+
+# Stan
+*.stan.exe
+*-stanc.exe
+analysis/model/*.hpp
+analysis/model/*.o
+.cmdstan/
+
+# JAX / PyTorch caches
+.jax_cache/
+lightning_logs/
+
+# Large posterior / model outputs — version via Zenodo, not git
+results/posterior/*.nc
+results/posterior/*.rds
+results/posterior/*.h5
+results/*.parquet
+
+# Docs build
+docs/_build/
+docs/site/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo

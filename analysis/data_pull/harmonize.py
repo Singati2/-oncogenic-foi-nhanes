@@ -45,20 +45,25 @@ def _read_xpt(path: Path) -> pd.DataFrame | None:
         return None
 
 
-def _derive_hpv_hr(hpv_raw: pd.DataFrame, spec: dict) -> pd.Series:
+def _derive_hpv_hr(
+    hpv_raw: pd.DataFrame,
+    hr_vars: list[str],
+    positive: list[int],
+    negative: list[int],
+) -> pd.Series:
     """Derive 'any high-risk HPV seropositive' from type-specific variables."""
-    hr_vars = [v for v in spec["high_risk_type_vars"] if v in hpv_raw.columns]
-    if not hr_vars:
-        logger.warning("no high-risk HPV variables found in %s", list(hpv_raw.columns)[:8])
+    available = [v for v in hr_vars if v in hpv_raw.columns]
+    if not available:
+        logger.warning(
+            "no requested HPV variables found in columns %s", list(hpv_raw.columns)[:8]
+        )
         return pd.Series(pd.NA, index=hpv_raw.index, dtype="Int8")
 
-    pos = spec["positive_values"]
-    neg = spec["negative_values"]
-    any_pos = (hpv_raw[hr_vars].isin(pos)).any(axis=1)
-    all_neg = (hpv_raw[hr_vars].isin(neg)).all(axis=1)
+    any_pos = (hpv_raw[available].isin(positive)).any(axis=1)
+    all_neg = (hpv_raw[available].isin(negative)).all(axis=1)
     out = pd.Series(pd.NA, index=hpv_raw.index, dtype="Int8")
     out.loc[all_neg] = 0
-    out.loc[any_pos] = 1   # positive trumps negative if any type is positive
+    out.loc[any_pos] = 1   # positive trumps negative if any single type is positive
     return out
 
 
@@ -107,16 +112,22 @@ def harmonize_cycle(
             out_name=out_name,
         )
 
-    # EBV (children 6-19 only; will be mostly missing for adults)
-    v = spec["variables"]["ebv"]
+    # EBV (children 6-19; mostly missing for adults). Per-cycle variable name.
+    ebv_cfg = spec["variables"]["ebv"]
+    ebv_var = ebv_cfg["sero_var_by_cycle"].get(cycle_code)
     df = _attach_single_var(
-        df, paths.get("ebv"), v["sero_var"],
-        v["positive_values"], v["negative_values"],
+        df, paths.get("ebv"), ebv_var,
+        ebv_cfg["positive_values"], ebv_cfg["negative_values"],
         out_name="sero_ebv",
     )
 
-    # HPV high-risk (multi-variable derivation)
-    df = _attach_hpv(df, paths.get("hpv"), spec["variables"]["hpv"])
+    # HPV high-risk (multi-variable derivation, per-cycle variable list).
+    hpv_cfg = spec["variables"]["hpv"]
+    hr_vars = hpv_cfg["high_risk_type_vars_by_cycle"].get(cycle_code, [])
+    df = _attach_hpv(
+        df, paths.get("hpv"), hr_vars,
+        hpv_cfg["positive_values"], hpv_cfg["negative_values"],
+    )
 
     return df
 
@@ -150,15 +161,19 @@ def _attach_single_var(
 
 
 def _attach_hpv(
-    df: pd.DataFrame, hpv_path: Path | None, hpv_spec: dict
+    df: pd.DataFrame,
+    hpv_path: Path | None,
+    hr_vars: list[str],
+    positive: list[int],
+    negative: list[int],
 ) -> pd.DataFrame:
-    if hpv_path is None:
+    if hpv_path is None or not hr_vars:
         df["sero_hpv_hr"] = pd.NA
         return df
     raw = _read_xpt(hpv_path)
     if raw is None:
         df["sero_hpv_hr"] = pd.NA
         return df
-    sero = _derive_hpv_hr(raw, hpv_spec)
+    sero = _derive_hpv_hr(raw, hr_vars, positive, negative)
     sub = pd.DataFrame({"seqn": raw["SEQN"].astype("int64"), "sero_hpv_hr": sero})
     return df.merge(sub, on="seqn", how="left")

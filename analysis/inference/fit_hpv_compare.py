@@ -10,17 +10,27 @@ What this script does and why it differs from fit_hpv.py / fit_hpv_reverse.py
    spans the full prior support). The reverse-catalytic likelihood is gentler
    and converges cleanly from cold start, but we init it too for symmetry.
 
-2. log_likelihood for WAIC/LOO is computed at the INDIVIDUAL-PARTICIPANT level
-   (sum_i n_total_i ≈ 14,478 Bernoulli terms) rather than the BINNED level
-   (9 Binomial terms). At bin level, leave-one-out removes ~1,500 participants
-   per fold; PSIS importance sampling fails (Pareto k > 0.7 for most folds on
-   the constant-FOI fit) and p_waic is inflated relative to the 1-2 actual
-   model parameters. At individual level, LOO is a per-Bernoulli perturbation
-   so the diagnostics are interpretable.
+2. The Bayesian fit uses the BINNED likelihood (9 Binomial terms, one per
+   age bin) — the posterior is the binned posterior. For WAIC/LOO we expand
+   this into PARTICIPANT-LEVEL BERNOULLI terms: each of the ~14,478
+   participants contributes one Bernoulli log-likelihood evaluated at their
+   bin's predicted probability p_{b(i)}, NOT at their raw age. Within a bin
+   every participant shares the same p. The expansion is mathematically
+   equivalent to the Binomial up to a parameter-independent constant, so the
+   posterior is unchanged; only the IC accounting changes.
 
-   The posterior is identical to a Binomial likelihood (Binom and product-of-
-   Bernoullis differ only by a parameter-independent normalizing constant), so
-   the only thing that changes is the IC accounting.
+   Why this matters for diagnostics: at bin level, leave-one-out removes
+   ~1,500 participants per fold; PSIS importance sampling fails (Pareto k
+   > 0.7 for most folds on the constant-FOI fit) and p_waic is inflated
+   relative to the 1-2 actual model parameters. At participant granularity,
+   LOO is a per-Bernoulli perturbation, Pareto k is well-controlled, and
+   p_waic matches model complexity (~1 for constant, ~1.4 for reverse).
+
+   Caveat: the WAIC/LOO produced here compares two BINNED models on a
+   participant-level loss decomposition. It does NOT evaluate p at each
+   participant's raw age. A genuinely age-resolved IC (refit with raw ages
+   rather than bin centers, or evaluate p at each participant's raw age
+   while keeping the binned fit) would be a separate robustness check.
 
 3. The drop-oldest-bin reverse refit answers: when the age-57.5 bin (where the
    observed seroprevalence declines) is removed, does omega drop toward a
@@ -105,12 +115,12 @@ def run_mcmc(
     return mcmc
 
 
-def _expand_individuals(n_total: np.ndarray, n_pos: np.ndarray):
-    """Construct individual-level (bin_index, y) for sum(n_total) participants.
+def _expand_to_participants(n_total: np.ndarray, n_pos: np.ndarray):
+    """Construct participant-level (bin_index, y) for sum(n_total) participants.
 
-    Within each bin, the first n_pos[i] individuals are seropositive (y=1),
+    Within each bin, the first n_pos[i] participants are seropositive (y=1),
     the remaining n_total[i] - n_pos[i] are seronegative (y=0). Within-bin
-    individual order does not affect WAIC/LOO since they share p_i.
+    participant order does not affect WAIC/LOO since they all share p_{b(i)}.
     """
     n_total = np.asarray(n_total, dtype=int)
     n_pos = np.asarray(n_pos, dtype=int)
@@ -123,44 +133,60 @@ def _expand_individuals(n_total: np.ndarray, n_pos: np.ndarray):
     return bin_idx, y
 
 
-def _ll_per_individual(p_bin: np.ndarray, bin_idx: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """log Bernoulli(y_i ; p_{b(i)}) per draw, per individual.
+def _ll_per_participant(p_bin: np.ndarray, bin_idx: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """log Bernoulli(y_i ; p_{b(i)}) per draw, per participant.
+
+    Each participant inherits their bin's predicted probability — within-bin
+    all participants share p_{b(i)}, not a raw-age-specific value.
 
     p_bin:    (n_draws, n_bins)
-    bin_idx:  (n_indiv,)
-    y:        (n_indiv,)
-    returns:  (n_draws, n_indiv)
+    bin_idx:  (n_participants,)
+    y:        (n_participants,)
+    returns:  (n_draws, n_participants)
     """
-    p_indiv = p_bin[:, bin_idx]
+    p_part = p_bin[:, bin_idx]
     eps = 1e-300
-    log_p = np.log(np.clip(p_indiv, eps, 1.0))
-    log_1mp = np.log(np.clip(1.0 - p_indiv, eps, 1.0))
+    log_p = np.log(np.clip(p_part, eps, 1.0))
+    log_1mp = np.log(np.clip(1.0 - p_part, eps, 1.0))
     return np.where(y[None, :] == 1, log_p, log_1mp)
 
 
-def individual_loglik_constant(
+def participant_bernoulli_loglik_constant(
     samples: dict, ages: np.ndarray, n_total: np.ndarray, n_pos: np.ndarray
 ) -> np.ndarray:
-    bin_idx, y = _expand_individuals(n_total, n_pos)
+    """Bin-pooled p expanded to one Bernoulli log-lik per participant (constant-FOI).
+
+    For each bin i: p_i = 1 - exp(-lambda * age_bin_i). Every participant in
+    bin i contributes log Bernoulli(y; p_i) — they share the bin's predicted
+    probability, not a raw-age-specific value.
+    """
+    bin_idx, y = _expand_to_participants(n_total, n_pos)
     lam = np.asarray(samples["lambda"])
     p_bin = 1.0 - np.exp(-lam[:, None] * ages[None, :])
-    return _ll_per_individual(p_bin, bin_idx, y)
+    return _ll_per_participant(p_bin, bin_idx, y)
 
 
-def individual_loglik_reverse(
+def participant_bernoulli_loglik_reverse(
     samples: dict, ages: np.ndarray, n_total: np.ndarray, n_pos: np.ndarray
 ) -> np.ndarray:
-    bin_idx, y = _expand_individuals(n_total, n_pos)
+    """Bin-pooled p expanded to one Bernoulli log-lik per participant (reverse-catalytic).
+
+    For each bin i:
+        p_i = (lambda / (lambda + omega)) * (1 - exp(-(lambda + omega) * age_bin_i)).
+    Every participant in bin i contributes log Bernoulli(y; p_i) — they share
+    the bin's predicted probability, not a raw-age-specific value.
+    """
+    bin_idx, y = _expand_to_participants(n_total, n_pos)
     lam = np.asarray(samples["lambda"])
     om = np.asarray(samples["omega"])
     s = lam + om
     p_bin = (lam[:, None] / s[:, None]) * (1.0 - np.exp(-s[:, None] * ages[None, :]))
-    return _ll_per_individual(p_bin, bin_idx, y)
+    return _ll_per_participant(p_bin, bin_idx, y)
 
 
 def build_idata(
     mcmc: MCMC,
-    ll_indiv: np.ndarray,
+    ll_participant: np.ndarray,
     *,
     n_chains: int,
     n_samples: int,
@@ -168,8 +194,8 @@ def build_idata(
     posterior = {
         k: np.asarray(v) for k, v in mcmc.get_samples(group_by_chain=True).items()
     }
-    n_indiv = ll_indiv.shape[1]
-    ll = ll_indiv.reshape(n_chains, n_samples, n_indiv)
+    n_participants = ll_participant.shape[1]
+    ll = ll_participant.reshape(n_chains, n_samples, n_participants)
     return az.from_dict(posterior=posterior, log_likelihood={"obs": ll})
 
 
@@ -226,8 +252,8 @@ def main() -> None:
     df = pd.read_parquet(PARQUET)
     hpv = filter_hpv(df, args.age_min, args.age_max)
     binned = bin_by_age(hpv, args.bin_width)
-    n_indiv = int(binned["n_total"].sum())
-    print(f"\n=== Binned data ({len(binned)} bins, n={n_indiv}) ===")
+    n_participants = int(binned["n_total"].sum())
+    print(f"\n=== Binned data ({len(binned)} bins, n={n_participants}) ===")
     print(binned.to_string(index=False))
 
     ages = binned["age_bin"].to_numpy(dtype=float)
@@ -245,7 +271,7 @@ def main() -> None:
     summ_const = summarize(mcmc_const, ["lambda"])
     print(json.dumps(summ_const, indent=2))
     chain_diagnostics(mcmc_const, "constant-FOI")
-    ll_const = individual_loglik_constant(
+    ll_const = participant_bernoulli_loglik_constant(
         mcmc_const.get_samples(), ages, n_total, n_pos
     )
     idata_const = build_idata(
@@ -264,7 +290,7 @@ def main() -> None:
     summ_rev = summarize(mcmc_rev, ["lambda", "omega", "steady_state"])
     print(json.dumps(summ_rev, indent=2))
     chain_diagnostics(mcmc_rev, "reverse")
-    ll_rev = individual_loglik_reverse(
+    ll_rev = participant_bernoulli_loglik_reverse(
         mcmc_rev.get_samples(), ages, n_total, n_pos
     )
     idata_rev = build_idata(
@@ -272,12 +298,18 @@ def main() -> None:
         n_chains=args.n_chains, n_samples=args.n_samples,
     )
 
-    # ---- WAIC/LOO ----
-    print(f"\n=== WAIC (individual-level, n={n_indiv}) ===")
+    # ---- WAIC/LOO (binned likelihood, participant-Bernoulli expansion) ----
+    print(
+        f"\n=== WAIC (binned likelihood, participant-Bernoulli expansion; "
+        f"n={n_participants}) ==="
+    )
     print("constant:", az.waic(idata_const, scale="log"))
     print("reverse: ", az.waic(idata_rev, scale="log"))
 
-    print(f"\n=== LOO  (individual-level, n={n_indiv}) ===")
+    print(
+        f"\n=== LOO  (binned likelihood, participant-Bernoulli expansion; "
+        f"n={n_participants}) ==="
+    )
     print("constant:", az.loo(idata_const, scale="log"))
     print("reverse: ", az.loo(idata_rev, scale="log"))
 

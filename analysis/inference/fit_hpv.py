@@ -49,17 +49,32 @@ def filter_hpv(df: pd.DataFrame, age_min: float, age_max: float) -> pd.DataFrame
 
 
 def bin_by_age(df: pd.DataFrame, bin_width: float) -> pd.DataFrame:
-    """Aggregate (n_total, n_pos) per age bin; bin center used as the age."""
-    binned = df.copy()
-    binned["age_bin"] = (
-        np.floor(binned["age"] / bin_width) * bin_width + bin_width / 2
+    """Aggregate (n_total, n_pos) per age bin; bin center used as the age.
+
+    Bin assignment:
+        age_bin = floor(age / bin_width) * bin_width + bin_width / 2,
+    so age a falls in the bin centered at floor(a/w)*w + w/2, spanning
+    [floor(a/w)*w, floor(a/w)*w + w).
+
+    Determinism contract (bit-for-bit identical output for identical input):
+      - Rows with NaN age or NaN sero_hpv_hr are dropped before binning.
+      - groupby uses sort=True and dropna=True (explicit, version-stable).
+      - Bins with n_total == 0 do not appear in the output.
+      - Output is sorted by age_bin ascending with a fresh index.
+    """
+    work = df[df["age"].notna() & df["sero_hpv_hr"].notna()].copy()
+    work["sero_hpv_hr"] = work["sero_hpv_hr"].astype(int)
+    work["age_bin"] = (
+        np.floor(work["age"].to_numpy(dtype=float) / float(bin_width))
+        * float(bin_width)
+        + float(bin_width) / 2.0
     )
     out = (
-        binned.groupby("age_bin", as_index=False)
+        work.groupby("age_bin", as_index=False, sort=True, dropna=True)
         .agg(n_total=("sero_hpv_hr", "size"), n_pos=("sero_hpv_hr", "sum"))
-        .sort_values("age_bin")
         .reset_index(drop=True)
     )
+    out = out[out["n_total"] > 0].reset_index(drop=True)
     return out
 
 

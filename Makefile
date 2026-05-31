@@ -20,8 +20,10 @@ pull:
 pull-cycle-c:
 	python -m analysis.data_pull.run --cycles C
 
-fit:
-	@echo "[stub] model fit not yet implemented"
+fit: fit-hpv
+
+fit-hpv:
+	python -m analysis.inference.fit_hpv
 
 figures:
 	@echo "[stub] figure generation not yet implemented"

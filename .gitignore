@@ -255,11 +255,9 @@ analysis/model/*.o
 .jax_cache/
 lightning_logs/
 
-# Large posterior / model outputs — version via Zenodo, not git
-results/posterior/*.nc
-results/posterior/*.rds
-results/posterior/*.h5
-results/*.parquet
+# Model outputs: figures, summaries, posterior samples. Regenerable from
+# code + data + seed. Version final paper figures via Zenodo, not git.
+results/
 
 # Docs build
 docs/_build/

@@ -26,11 +26,16 @@ What this script does and why it differs from fit_hpv.py / fit_hpv_reverse.py
    LOO is a per-Bernoulli perturbation, Pareto k is well-controlled, and
    p_waic matches model complexity (~1 for constant, ~1.4 for reverse).
 
-   Caveat: the WAIC/LOO produced here compares two BINNED models on a
-   participant-level loss decomposition. It does NOT evaluate p at each
-   participant's raw age. A genuinely age-resolved IC (refit with raw ages
-   rather than bin centers, or evaluate p at each participant's raw age
-   while keeping the binned fit) would be a separate robustness check.
+   The script ALSO computes an AGE-RESOLVED variant alongside the
+   bin-center expansion: each participant's Bernoulli log-likelihood is
+   evaluated at their raw NHANES age using the SAME binned-fit posterior
+   draws (no refit). This tests whether the bin-pooled IC ranking survives
+   at the natural data granularity. The bin-center expansion remains the
+   primary IC (it matches the actual model fit); the age-resolved version
+   is a sensitivity/cross-check.
+
+   A third-level check — refitting the models with raw ages rather than
+   bin centers — would require a separate fit and is not done here.
 
 3. The drop-oldest-bin reverse refit answers: when the age-57.5 bin (where the
    observed seroprevalence declines) is removed, does omega drop toward a
@@ -184,6 +189,59 @@ def participant_bernoulli_loglik_reverse(
     return _ll_per_participant(p_bin, bin_idx, y)
 
 
+def participant_bernoulli_loglik_constant_age_resolved(
+    samples: dict, raw_ages: np.ndarray, y: np.ndarray
+) -> np.ndarray:
+    """Bernoulli log-lik per participant evaluated at the participant's RAW age (constant-FOI).
+
+    Unlike participant_bernoulli_loglik_constant (which expands 9 bin-center
+    p-values across bin members), this evaluates the prevalence formula at
+    each participant's actual age:
+
+        p_i = 1 - exp(-lambda * raw_age_i)   for participant i
+
+    so the resulting p array has shape (n_draws, n_participants) with as many
+    distinct columns per draw as there are distinct raw ages in the data —
+    NOT 9 bin centers tiled. The posterior `samples` is the SAME binned-fit
+    posterior used by participant_bernoulli_loglik_constant; this function
+    does not refit, only re-scores those draws at finer age granularity.
+
+    raw_ages: (n_participants,) per-participant age in years
+    y:        (n_participants,) per-participant serostatus (0/1)
+    returns:  (n_draws, n_participants)
+    """
+    lam = np.asarray(samples["lambda"])  # (n_draws,)
+    p = 1.0 - np.exp(-lam[:, None] * raw_ages[None, :])  # (n_draws, n_participants)
+    eps = 1e-300
+    log_p = np.log(np.clip(p, eps, 1.0))
+    log_1mp = np.log(np.clip(1.0 - p, eps, 1.0))
+    return np.where(y[None, :] == 1, log_p, log_1mp)
+
+
+def participant_bernoulli_loglik_reverse_age_resolved(
+    samples: dict, raw_ages: np.ndarray, y: np.ndarray
+) -> np.ndarray:
+    """Bernoulli log-lik per participant evaluated at the participant's RAW age (reverse-catalytic).
+
+    For each participant i:
+        p_i = (lambda / (lambda + omega))
+              * (1 - exp(-(lambda + omega) * raw_age_i))
+
+    p has shape (n_draws, n_participants) with as many distinct columns per
+    draw as there are distinct raw ages in the data — NOT bin centers tiled.
+    Posterior `samples` is the SAME binned-fit posterior used by
+    participant_bernoulli_loglik_reverse; no refit, only re-scoring.
+    """
+    lam = np.asarray(samples["lambda"])
+    om = np.asarray(samples["omega"])
+    s = lam + om
+    p = (lam[:, None] / s[:, None]) * (1.0 - np.exp(-s[:, None] * raw_ages[None, :]))
+    eps = 1e-300
+    log_p = np.log(np.clip(p, eps, 1.0))
+    log_1mp = np.log(np.clip(1.0 - p, eps, 1.0))
+    return np.where(y[None, :] == 1, log_p, log_1mp)
+
+
 def build_idata(
     mcmc: MCMC,
     ll_participant: np.ndarray,
@@ -325,6 +383,94 @@ def main() -> None:
     )
     print(cmp_l.to_string())
 
+    # ---- Age-resolved IC (Option A) ----
+    # Reuse the SAME binned-fit posterior draws (mcmc_const, mcmc_rev); re-score
+    # each participant's Bernoulli log-likelihood at their raw NHANES age rather
+    # than at their bin center. No new MCMC call. The posterior is unchanged;
+    # only the IC's predicted-probability values change to age-resolved.
+    raw_ages = hpv["age"].to_numpy(dtype=float)
+    raw_y = hpv["sero_hpv_hr"].to_numpy(dtype=int)
+    assert len(raw_ages) == len(raw_y), (
+        f"raw_ages ({len(raw_ages)}) and raw_y ({len(raw_y)}) length mismatch"
+    )
+    assert len(raw_ages) == n_participants, (
+        f"raw participant count {len(raw_ages)} != sum of bin counts "
+        f"{n_participants}; data filtering inconsistent between binned and raw paths"
+    )
+
+    n_unique_raw_age = int(np.unique(raw_ages).size)
+    n_unique_bin_center = int(np.unique(ages).size)
+    assert n_unique_raw_age > n_unique_bin_center, (
+        f"Age-resolution check FAILED: raw ages have only {n_unique_raw_age} "
+        f"unique values, not > {n_unique_bin_center} bin centers — did "
+        f"raw_ages get accidentally constructed from bin centers?"
+    )
+
+    # Verify that p computed from raw ages actually varies at age granularity,
+    # not just at bin-center granularity. Take one posterior draw, recompute p
+    # the same way the new helper does, count distinct values.
+    lam_draws = np.asarray(mcmc_const.get_samples()["lambda"])
+    p_const_draw0 = 1.0 - np.exp(-lam_draws[0] * raw_ages)
+    n_distinct_p_const = int(np.unique(p_const_draw0).size)
+    assert n_distinct_p_const == n_unique_raw_age, (
+        f"Distinct-p check FAILED: constant-FOI p at draw 0 has "
+        f"{n_distinct_p_const} unique values; expected {n_unique_raw_age} "
+        f"(one per unique raw age). p_bin[:, bin_idx] tiling would give "
+        f"{n_unique_bin_center}."
+    )
+
+    print(
+        f"\n=== Age-resolution check ===\n"
+        f"  raw ages: {n_unique_raw_age} unique values across "
+        f"{len(raw_ages)} participants (e.g. first 5: {raw_ages[:5].tolist()})\n"
+        f"  bin centers: {n_unique_bin_center} unique values\n"
+        f"  constant-FOI p (draw 0): {n_distinct_p_const} distinct values "
+        f"-> age-resolved, NOT bin-tiled"
+    )
+
+    ll_const_raw = participant_bernoulli_loglik_constant_age_resolved(
+        mcmc_const.get_samples(), raw_ages, raw_y
+    )
+    ll_rev_raw = participant_bernoulli_loglik_reverse_age_resolved(
+        mcmc_rev.get_samples(), raw_ages, raw_y
+    )
+    idata_const_raw = build_idata(
+        mcmc_const, ll_const_raw,
+        n_chains=args.n_chains, n_samples=args.n_samples,
+    )
+    idata_rev_raw = build_idata(
+        mcmc_rev, ll_rev_raw,
+        n_chains=args.n_chains, n_samples=args.n_samples,
+    )
+
+    print(
+        f"\n=== WAIC (age-resolved; binned-fit posterior re-scored at raw ages; "
+        f"n={len(raw_ages)}) ==="
+    )
+    print("constant:", az.waic(idata_const_raw, scale="log"))
+    print("reverse: ", az.waic(idata_rev_raw, scale="log"))
+
+    print(
+        f"\n=== LOO  (age-resolved; binned-fit posterior re-scored at raw ages; "
+        f"n={len(raw_ages)}) ==="
+    )
+    print("constant:", az.loo(idata_const_raw, scale="log"))
+    print("reverse: ", az.loo(idata_rev_raw, scale="log"))
+
+    print("\n=== az.compare WAIC (age-resolved) ===")
+    cmp_w_raw = az.compare(
+        {"constant": idata_const_raw, "reverse": idata_rev_raw},
+        ic="waic", scale="log",
+    )
+    print(cmp_w_raw.to_string())
+
+    print("\n=== az.compare LOO (age-resolved) ===")
+    cmp_l_raw = az.compare(
+        {"constant": idata_const_raw, "reverse": idata_rev_raw},
+        ic="loo", scale="log",
+    )
+    print(cmp_l_raw.to_string())
+
     # ---- Drop-oldest sensitivity ----
     mask = ages < args.drop_oldest_threshold
     ages_d = ages[mask]
@@ -350,6 +496,8 @@ def main() -> None:
     SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
     cmp_w.to_csv(SUMMARY_DIR / "hpv_waic_comparison.csv")
     cmp_l.to_csv(SUMMARY_DIR / "hpv_loo_comparison.csv")
+    cmp_w_raw.to_csv(SUMMARY_DIR / "hpv_waic_comparison_age_resolved.csv")
+    cmp_l_raw.to_csv(SUMMARY_DIR / "hpv_loo_comparison_age_resolved.csv")
     drop_df = pd.DataFrame(
         [
             {"param": p, "data": "full", **summ_rev[p]}
@@ -364,6 +512,8 @@ def main() -> None:
 
     print(f"\nWrote {SUMMARY_DIR / 'hpv_waic_comparison.csv'}")
     print(f"Wrote {SUMMARY_DIR / 'hpv_loo_comparison.csv'}")
+    print(f"Wrote {SUMMARY_DIR / 'hpv_waic_comparison_age_resolved.csv'}")
+    print(f"Wrote {SUMMARY_DIR / 'hpv_loo_comparison_age_resolved.csv'}")
     print(f"Wrote {SUMMARY_DIR / 'hpv_reverse_drop_oldest_bin.csv'}")
 
 
